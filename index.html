@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DCS Tactical Map & Mission Planner</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map { height: 100vh; width: 100vw; margin: 0; padding: 0; background: #111; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+        .plane-icon { transition: transform 0.1s linear; }
+        
+        #recenter-btn {
+            position: absolute;
+            bottom: 30px;
+            right: 20px;
+            z-index: 1000;
+            background-color: #2b2b2b;
+            color: white;
+            border: 2px solid #555;
+            padding: 12px 20px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.4);
+            transition: background 0.2s;
+        }
+        #recenter-btn:hover { background-color: #444; }
+        #recenter-btn:active { background-color: #111; }
+
+        /* --- DRAG HANDLES --- */
+        .drag-handle {
+            cursor: grab;
+            color: #aaa;
+            font-size: 12px;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+        .drag-handle:active { cursor: grabbing; }
+
+        #hud-box {
+            position: absolute;
+            top: 20px;
+            left: 20px; 
+            z-index: 1000;
+            background-color: rgba(20, 20, 20, 0.85);
+            color: #00ff00;
+            border: 2px solid #444;
+            padding: 12px 16px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 8px;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.5);
+            line-height: 1.4;
+            pointer-events: auto; 
+        }
+
+        .hud-coord-line {
+            font-size: 14px; 
+            color: #eee; 
+            margin-top: 6px; 
+            padding: 4px 8px;
+            background-color: rgba(0, 0, 0, 0.6);
+            border: 1px solid #555;
+            border-radius: 4px;
+            user-select: text; 
+            white-space: nowrap; 
+            text-align: left;
+            display: block; 
+        }
+
+        /* --- THREAT WARNING HUD --- */
+        #threat-alert {
+            display: none;
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 2000;
+            background-color: rgba(60, 0, 0, 0.9);
+            color: #fff;
+            border: 3px solid #ff2222;
+            padding: 15px 30px;
+            text-align: center;
+            font-family: 'Courier New', monospace;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(255, 0, 0, 0.8);
+            animation: threatFlash 1s infinite alternate;
+            pointer-events: none;
+        }
+
+        #threat-title {
+            font-size: 22px;
+            font-weight: 900;
+            letter-spacing: 2px;
+            margin-bottom: 5px;
+            color: #ff4444;
+        }
+
+        #threat-details {
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+        }
+
+        @keyframes threatFlash {
+            0% { box-shadow: 0 0 20px rgba(255, 0, 0, 0.8); border-color: #ff2222; }
+            100% { box-shadow: 0 0 5px rgba(255, 0, 0, 0.3); border-color: #aa1111; }
+        }
+
+        .measure-tooltip {
+            background-color: rgba(20, 20, 20, 0.85);
+            color: #ffaa00;
+            border: 1px solid #ffaa00;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 15px;
+            font-weight: bold;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.5);
+        }
+        .leaflet-tooltip-left.measure-tooltip::before,
+        .leaflet-tooltip-right.measure-tooltip::before,
+        .leaflet-tooltip-top.measure-tooltip::before,
+        .leaflet-tooltip-bottom.measure-tooltip::before {
+            display: none;
+        }
+
+        #search-container {
+            position: absolute;
+            top: 195px; 
+            left: 20px; 
+            z-index: 1000;
+            background-color: rgba(20, 20, 20, 0.85);
+            padding: 8px;
+            border-radius: 8px;
+            border: 2px solid #444;
+            display: flex;
+            gap: 5px;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.5);
+        }
+        
+        #search-input {
+            background: #222;
+            color: #00ff00;
+            border: 1px solid #555;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            outline: none;
+            width: 180px;
+        }
+        #search-input::placeholder { color: #666; }
+        
+        #search-btn {
+            background-color: #333;
+            color: white;
+            border: 1px solid #555;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        #search-btn:hover { background-color: #555; }
+
+        /* --- MISSION PLANNER UI --- */
+        #planner-panel {
+            position: absolute;
+            top: 255px; 
+            left: 20px;
+            z-index: 1000;
+            background-color: rgba(20, 20, 20, 0.92);
+            color: #eee;
+            border: 2px solid #00bbff;
+            border-radius: 8px;
+            width: 250px;
+            box-shadow: 0px 6px 12px rgba(0,0,0,0.7);
+            font-size: 13px;
+        }
+
+        #planner-header {
+            background: #004466;
+            color: #00e1ff;
+            padding: 8px 12px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
+            cursor: grab;
+            user-select: none;
+        }
+        #planner-header:active { cursor: grabbing; }
+
+        #planner-body {
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+
+        .tool-btn-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+        }
+
+        .planner-btn {
+            background: #2a2a2a;
+            color: #ddd;
+            border: 1px solid #555;
+            padding: 6px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 12px;
+            text-align: center;
+            transition: all 0.15s ease;
+        }
+        .planner-btn:hover { background: #3a3a3a; color: #fff; border-color: #888; }
+        .planner-btn.active { background: #0088cc; color: #fff; border-color: #00d4ff; box-shadow: 0 0 6px #00d4ff; }
+        .planner-btn.danger { background: #551111; border-color: #882222; }
+        .planner-btn.danger:hover { background: #771a1a; }
+        .planner-btn.action { background: #1b4d3e; border-color: #2e8b57; }
+        .planner-btn.action:hover { background: #246b56; }
+
+        .planner-select {
+            background: #222;
+            color: #00e1ff;
+            border: 1px solid #555;
+            padding: 5px;
+            border-radius: 4px;
+            font-size: 12px;
+            outline: none;
+        }
+
+        /* --- THREAT LIBRARY UI --- */
+        #threat-lib-panel {
+            position: absolute;
+            top: 20px; 
+            right: 20px;
+            z-index: 1000;
+            background-color: rgba(20, 20, 20, 0.92);
+            color: #eee;
+            border: 2px solid #ffaa00;
+            border-radius: 8px;
+            width: 320px;
+            box-shadow: 0px 6px 12px rgba(0,0,0,0.7);
+            font-size: 13px;
+            display: flex;
+            flex-direction: column;
+            max-height: 80vh;
+        }
+
+        #threat-lib-header {
+            background: #663300;
+            color: #ffaa00;
+            padding: 8px 12px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
+            cursor: grab;
+            user-select: none;
+        }
+        #threat-lib-header:active { cursor: grabbing; }
+
+        #threat-lib-body {
+            display: none;
+            padding: 10px;
+            flex-direction: column;
+            gap: 8px;
+            overflow: hidden;
+            flex-grow: 1;
+        }
+
+        /* Threat Filter Buttons */
+        .threat-filter-container {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 2px;
+        }
+        .threat-filter-btn {
+            flex: 1;
+            background: #2a2a2a;
+            color: #aaa;
+            border: 1px solid #444;
+            padding: 4px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: bold;
+            transition: all 0.1s;
+        }
+        .threat-filter-btn:hover { background: #3a3a3a; color: #eee; }
+        .threat-filter-btn.active[data-coalition="All"] { background: #555; color: #fff; border-color: #777; }
+        .threat-filter-btn.active[data-coalition="Red"] { background: #660000; color: #ff4444; border-color: #ff4444; box-shadow: 0 0 4px #ff4444; }
+        .threat-filter-btn.active[data-coalition="Blue"] { background: #002266; color: #4488ff; border-color: #4488ff; box-shadow: 0 0 4px #4488ff; }
+
+        #threat-lib-search {
+            background: #222;
+            color: #ffaa00;
+            border: 1px solid #555;
+            padding: 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            outline: none;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        #threat-lib-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            overflow-y: auto;
+            max-height: 200px;
+            border: 1px solid #444;
+            border-radius: 4px;
+        }
+
+        .threat-item {
+            padding: 6px 8px;
+            border-bottom: 1px solid #333;
+            cursor: pointer;
+            background: #1a1a1a;
+            transition: background 0.1s;
+            display: flex;
+            justify-content: space-between;
+        }
+        .threat-item:hover { background: #333; }
+        .threat-item.active { background: #442200; color: #ffaa00; font-weight: bold; border-left: 3px solid #ffaa00; }
+
+        #threat-lib-details {
+            background: #111;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            display: none;
+        }
+
+        .threat-stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            border-bottom: 1px dashed #333;
+            padding-bottom: 2px;
+        }
+        
+        .lethality-bar-bg {
+            height: 10px;
+            background: #222;
+            border-radius: 5px;
+            margin-top: 4px;
+            overflow: hidden;
+            border: 1px solid #555;
+        }
+        .lethality-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00ff00, #ffff00, #ff0000);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .wp-badge {
+            background: #00ff00;
+            color: #000;
+            font-weight: 900;
+            font-family: 'Courier New', monospace;
+            border-radius: 50%;
+            width: 22px;
+            height: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #000;
+            font-size: 11px;
+            box-shadow: 0 0 5px #000;
+        }
+
+        .tactical-badge {
+            font-family: 'Courier New', monospace;
+            font-weight: 900;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1.5px solid #000;
+            box-shadow: 0 0 5px rgba(0,0,0,0.8);
+            white-space: nowrap;
+        }
+        .badge-ip { background: #ffaa00; color: #000; }
+        .badge-eg { background: #ff00ff; color: #000; }
+        .badge-tgt { background: #ff2222; color: #fff; }
+        .badge-bullseye { background: #00d4ff; color: #000; }
+
+        .route-leg-label {
+            background: rgba(10, 10, 10, 0.85);
+            color: #00ffaa;
+            border: 1px solid #00ffaa;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            font-weight: bold;
+            padding: 1px 4px;
+            border-radius: 3px;
+        }
+        
+        .leaflet-popup-content {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    
+    <div id="threat-alert">
+        <div id="threat-title">⚠ THREAT ENGAGEMENT ⚠</div>
+        <div id="threat-details">SA-10 (4 NM)</div>
+    </div>
+
+    <!-- HUD / TELEMETRY -->
+    <div id="hud-box">
+        <div class="drag-handle" id="hud-drag" style="border-bottom: 1px dashed #555; margin-bottom: 6px; padding-bottom: 4px;">≡ TELEMETRY</div>
+        <div id="hud-spd">SPD: --- kts</div>
+        <div id="hud-alt">ALT: --- ft</div>
+        <div id="hud-ddm" class="hud-coord-line"><span style="color:#ffaa00;">DDM:</span> <span style="color:#fff;">---</span></div>
+        <div id="hud-mgrs" class="hud-coord-line"><span style="color:#ffaa00;">MGRS:</span> <span style="color:#fff;">---</span></div>
+    </div>
+
+    <!-- AIRPORT SEARCH -->
+    <div id="search-container">
+        <div class="drag-handle" id="search-drag" style="margin-right: 5px; padding: 0 4px; font-size: 18px;">≡</div>
+        <input type="text" id="search-input" placeholder="Search Airport (e.g. Batumi)">
+        <button id="search-btn">🔍</button>
+    </div>
+
+    <!-- MISSION PLANNER PANEL -->
+    <div id="planner-panel">
+        <div id="planner-header" onclick="togglePlannerBody()">
+            <span>≡ 📋 SORTIE PLANNER</span>
+            <span id="planner-toggle-icon">▼</span>
+        </div>
+        <div id="planner-body">
+            <div style="font-size:11px; color:#aaa; margin-bottom:2px;">TACTICAL TOOLS</div>
+            <div class="tool-btn-grid">
+                <button class="planner-btn" id="tool-route" onclick="setPlannerTool('route')">✈ Route (WP)</button>
+                <button class="planner-btn" id="tool-arrow" onclick="setPlannerTool('arrow')">➔ Ingress Vector</button>
+                <button class="planner-btn" id="tool-ip" onclick="setPlannerTool('ip')">📍 IP Point</button>
+                <button class="planner-btn" id="tool-tgt" onclick="setPlannerTool('tgt')">🎯 Target (TGT)</button>
+                <button class="planner-btn" id="tool-eg" onclick="setPlannerTool('eg')">🏁 Egress (EG)</button>
+                <button class="planner-btn" id="tool-bullseye" onclick="setPlannerTool('bullseye')">⭕ Bullseye</button>
+            </div>
+
+            <div style="font-size:11px; color:#aaa; margin-top:4px;">THREAT RINGS (SAM/AAA)</div>
+            <select class="planner-select" id="sam-preset" onchange="setPlannerTool('threat')">
+                <option value="none">-- Select Threat Ring --</option>
+                <option value="4.5">MANPADS / SA-18 (4.5 NM)</option>
+                <option value="2.5">AAA / Shilka / Tunguska (2.5 NM)</option>
+                <option value="8.0">SA-8 / SA-15 Tor (8 NM)</option>
+                <option value="13.0">SA-6 Gainful (13 NM)</option>
+                <option value="18.0">SA-11 Buk (18 NM)</option>
+                <option value="25.0">SA-2 / SA-3 (25 NM)</option>
+                <option value="40.0">Patriot / SA-10 (40 NM)</option>
+                <option value="60.0">S-300 PMU2 (60 NM)</option>
+                <option value="custom">Custom Radius...</option>
+            </select>
+
+            <div style="font-size:11px; color:#aaa; margin-top:4px;">PLAN MANAGEMENT</div>
+            <div class="tool-btn-grid">
+                <button class="planner-btn action" onclick="savePlanToStorage()">💾 Save Plan</button>
+                <button class="planner-btn action" onclick="exportPlanJSON()">📤 Export</button>
+                <button class="planner-btn action" onclick="importPlanJSON()">📥 Import</button>
+                <button class="planner-btn danger" onclick="clearActiveTool()">❌ Stop Tool</button>
+            </div>
+            <button class="planner-btn danger" style="width:100%; margin-top:2px;" onclick="clearAllMissionGraphics()">🗑 Clear All Graphics</button>
+        </div>
+    </div>
+
+    <!-- THREAT LIBRARY PANEL -->
+    <div id="threat-lib-panel">
+        <div id="threat-lib-header" onclick="toggleThreatLibBody()">
+            <span>≡ 📖 THREAT LIBRARY</span>
+            <span id="threat-lib-icon">▼</span>
+        </div>
+        <div id="threat-lib-body">
+            <div class="threat-filter-container">
+                <button class="threat-filter-btn active" data-coalition="All" onclick="setThreatFilter('All')">All</button>
+                <button class="threat-filter-btn" data-coalition="Red" onclick="setThreatFilter('Red')">Red</button>
+                <button class="threat-filter-btn" data-coalition="Blue" onclick="setThreatFilter('Blue')">Blue</button>
+            </div>
+            <input type="text" id="threat-lib-search" placeholder="Search (e.g. SA-10, Hawk)..." onkeyup="filterThreats()">
+            <ul id="threat-lib-list">
+                <!-- Populated via JS -->
+            </ul>
+            <div id="threat-lib-details">
+                <div id="threat-lib-name" style="color:#ffaa00; font-weight:bold; font-size:14px; text-align:center; margin-bottom:8px;">---</div>
+                <div class="threat-stat-row"><span style="color:#888;">Coalition:</span><span id="threat-lib-coal">---</span></div>
+                <div class="threat-stat-row"><span style="color:#888;">Role:</span><span id="threat-lib-role">---</span></div>
+                <div class="threat-stat-row"><span style="color:#888;">Max Range:</span><span id="threat-lib-range">---</span></div>
+                <div class="threat-stat-row"><span style="color:#888;">Alt Min:</span><span id="threat-lib-min">---</span></div>
+                <div class="threat-stat-row"><span style="color:#888;">Alt Max:</span><span id="threat-lib-max">---</span></div>
+                
+                <div style="margin-top:8px;">
+                    <span style="color:#888;">Lethality Score (<span id="threat-lib-lethality-val">0</span>/10):</span>
+                    <div class="lethality-bar-bg"><div class="lethality-bar-fill" id="threat-lib-bar"></div></div>
+                </div>
+                
+                <div id="threat-lib-desc" style="color:#ccc; margin-top:8px; line-height:1.3; font-size:11px;">
+                    Select a threat to view tactical breakdown.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button id="recenter-btn">🎯 Recenter</button>
+    
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-rotatedmarker/leaflet.rotatedMarker.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mgrs/dist/mgrs.min.js"></script>
+    
+    <script>
+        // --- DRAG AND DROP SYSTEM ---
+        let isDraggingUI = false;
+
+        function makeDraggable(elmnt, dragHandle) {
+            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+            
+            dragHandle.onmousedown = dragMouseDown;
+
+            function dragMouseDown(e) {
+                e = e || window.event;
+                if (['INPUT', 'BUTTON', 'SELECT', 'OPTION'].includes(e.target.tagName)) return;
+                
+                e.preventDefault();
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                document.onmouseup = closeDragElement;
+                document.onmousemove = elementDrag;
+            }
+
+            function elementDrag(e) {
+                e = e || window.event;
+                e.preventDefault();
+                isDraggingUI = true;
+                pos1 = pos3 - e.clientX;
+                pos2 = pos4 - e.clientY;
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                elmnt.style.top = (elmnt.offsetTop - pos2) + "px";
+                elmnt.style.left = (elmnt.offsetLeft - pos1) + "px";
+                elmnt.style.right = 'auto'; 
+            }
+
+            function closeDragElement() {
+                document.onmouseup = null;
+                document.onmousemove = null;
+                localStorage.setItem(elmnt.id + '_pos', JSON.stringify({ top: elmnt.style.top, left: elmnt.style.left }));
+                setTimeout(() => { isDraggingUI = false; }, 50);
+            }
+        }
+
+        // 1. Define Base Maps 
+        const streetMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 18,
+            attribution: 'Tiles © Esri'
+        });
+
+        const topoMap = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 18,
+            attribution: 'Tiles © Esri'
+        });
+
+        // 2. Define Overlays
+        const openAipKey = "87d9d289963787e930f9eef67614a5c6"; 
+        const openAipLayer = L.tileLayer(`https://api.tiles.openaip.net/api/data/openaip/{z}/{x}/{y}.png?apiKey=${openAipKey}`, {
+            maxZoom: 14,
+            transparent: true,
+            attribution: 'Aviation Data: © OpenAIP'
+        });
+
+        // Mission Planning Layer Groups
+        const planRouteLayer = L.layerGroup();
+        const planTacticalLayer = L.layerGroup();
+        const planThreatLayer = L.layerGroup();
+
+        // 3. Initialize the Map
+        const map = L.map('map', {
+            center: [0, 0],
+            zoom: 2,
+            layers: [streetMap, openAipLayer, planRouteLayer, planTacticalLayer, planThreatLayer] 
+        });
+
+        // 4. Setup the Layer Control Box
+        const baseMaps = {
+            "Street Map (English)": streetMap,
+            "Topographic Map": topoMap
+        };
+
+        const overlays = { 
+            "Aviation Data (OpenAIP)": openAipLayer,
+            "Flight Plan Route": planRouteLayer,
+            "Tactical Points & Vectors": planTacticalLayer,
+            "Threat / SAM Rings": planThreatLayer
+        };
+
+        L.control.layers(baseMaps, overlays).addTo(map);
+
+        // --- PREVENT CLICKS FROM BLEEDING THROUGH UI PANELS ---
+        L.DomEvent.disableClickPropagation(document.getElementById('hud-box'));
+        L.DomEvent.disableClickPropagation(document.getElementById('search-container'));
+        L.DomEvent.disableClickPropagation(document.getElementById('planner-panel'));
+        L.DomEvent.disableScrollPropagation(document.getElementById('planner-panel'));
+        L.DomEvent.disableClickPropagation(document.getElementById('threat-lib-panel'));
+        L.DomEvent.disableScrollPropagation(document.getElementById('threat-lib-panel'));
+
+        const markers = {}; 
+        const dynamicThreatRings = {}; 
+        let hasCentered = false;
+        let lastKnownSelfLocation = null;
+
+        // --- COMPREHENSIVE THREAT LIBRARY DATABASE ---
+        const threatDatabase = [
+            // RED THREATS
+            { id: "sa5", name: "SA-5 Gammon (S-200)", role: "Long Range SAM", range: 150, altMin: 1000, altMax: 130000, lethality: 9, coalition: "Red", desc: "Extreme range, primarily targets high-altitude strategic assets. Poor low-altitude performance." },
+            { id: "sa10", name: "SA-10 Grumble (S-300)", role: "Long Range SAM", range: 45, altMin: 100, altMax: 100000, lethality: 10, coalition: "Red", desc: "Extreme threat. Advanced phased-array radar, highly resistant to jamming. Will engage multiple targets simultaneously at extreme ranges. DO NOT fly into envelope without SEAD support." },
+            { id: "sa2", name: "SA-2 Guideline", role: "Long Range SAM", range: 25, altMin: 1000, altMax: 60000, lethality: 5, coalition: "Red", desc: "Older, stationary SAM. Easy to outmaneuver or defeat with terrain masking, but lethal if ignored." },
+            { id: "sa11", name: "SA-11 Buk", role: "Medium Range SAM", range: 18, altMin: 50, altMax: 72000, lethality: 8, coalition: "Red", desc: "Highly advanced mobile SAM. Fast missile, highly lethal. Treat with extreme caution." },
+            { id: "sa3", name: "SA-3 Goa", role: "Medium Range SAM", range: 15, altMin: 100, altMax: 40000, lethality: 6, coalition: "Red", desc: "Older stationary SAM but highly maneuverable missile. Effective at lower altitudes than SA-2." },
+            { id: "sa6", name: "SA-6 Gainful (Kub)", role: "Medium Range SAM", range: 13, altMin: 100, altMax: 39000, lethality: 7, coalition: "Red", desc: "Mobile tracked SAM. Deadly medium-range threat. Requires active radar warning tracking." },
+            { id: "sa15", name: "SA-15 Tor", role: "Short Range SAM", range: 8, altMin: 50, altMax: 20000, lethality: 8, coalition: "Red", desc: "Modern, highly automated mobile point-defense. Capable of shooting down guided munitions and low-flying jets." },
+            { id: "sa8", name: "SA-8 Osa", role: "Short Range SAM", range: 8, altMin: 50, altMax: 16000, lethality: 6, coalition: "Red", desc: "Mobile amphibious SAM. Dangerous to low-level strikers and helicopters." },
+            { id: "sa9", name: "SA-9 Gaskin", role: "Short Range IR SAM", range: 4.5, altMin: 50, altMax: 16000, lethality: 5, coalition: "Red", desc: "Mobile IR-guided SAM. Does not trigger RWR. Pre-flare when engaging." },
+            { id: "sa13", name: "SA-13 Gopher", role: "Short Range IR SAM", range: 2.7, altMin: 30, altMax: 11500, lethality: 6, coalition: "Red", desc: "More advanced mobile IR SAM. Highly lethal to low-flying aircraft." },
+            { id: "sa19", name: "SA-19 Tunguska (2S6)", role: "SHORAD / AAA", range: 4.5, altMin: 0, altMax: 11500, lethality: 7, coalition: "Red", desc: "Combined missile and radar-guided AAA. Shreds helicopters and low-level CAS jets." },
+            { id: "igla", name: "SA-18 Igla", role: "MANPADS", range: 2.5, altMin: 0, altMax: 11000, lethality: 5, coalition: "Red", desc: "Shoulder-fired IR-guided missile. Unpredictable, gives no radar warning. Pre-flare when entering target areas." },
+            { id: "shilka", name: "ZSU-23-4 Shilka", role: "AAA", range: 1.5, altMin: 0, altMax: 5000, lethality: 4, coalition: "Red", desc: "Radar-guided quad 23mm anti-aircraft artillery. Deadly to helis within 1.5nm." },
+
+            // BLUE THREATS
+            { id: "patriot", name: "MIM-104 Patriot", role: "Long Range SAM", range: 40, altMin: 100, altMax: 100000, lethality: 10, coalition: "Blue", desc: "Extreme threat. Highly capable Western long-range air defense system. Extreme speed and maneuverability." },
+            { id: "hawk", name: "MIM-23 HAWK", role: "Medium Range SAM", range: 25, altMin: 200, altMax: 45000, lethality: 7, coalition: "Blue", desc: "Semi-active radar homing medium-range SAM. Very fast missile." },
+            { id: "crotale", name: "Crotale", role: "Short Range SAM", range: 5.5, altMin: 50, altMax: 16000, lethality: 7, coalition: "Blue", desc: "Fast-reacting, radar-guided short range defense system." },
+            { id: "roland", name: "Roland ADS", role: "Short Range SAM", range: 4.5, altMin: 50, altMax: 18000, lethality: 6, coalition: "Blue", desc: "Mobile short-range radar-guided SAM. Highly effective point defense." },
+            { id: "rapier", name: "Rapier FCS", role: "Short Range SAM", range: 3.8, altMin: 50, altMax: 10000, lethality: 6, coalition: "Blue", desc: "Optical/Radar guided short-range point defense system." },
+            { id: "avenger", name: "AN/TWQ-1 Avenger", role: "SHORAD", range: 2.5, altMin: 0, altMax: 11000, lethality: 5, coalition: "Blue", desc: "Humvee-mounted Stinger missile system. Deadly to low-level aircraft, no RWR warning." },
+            { id: "linebacker", name: "M6 Linebacker", role: "SHORAD", range: 2.5, altMin: 0, altMax: 11000, lethality: 5, coalition: "Blue", desc: "Bradley-mounted Stinger system combined with a 25mm cannon." },
+            { id: "stinger", name: "FIM-92 Stinger", role: "MANPADS", range: 2.5, altMin: 0, altMax: 11000, lethality: 5, coalition: "Blue", desc: "Shoulder-fired IR-guided missile. Unpredictable, gives no radar warning." },
+            { id: "gepard", name: "Flakpanzer Gepard", role: "AAA", range: 1.6, altMin: 0, altMax: 10000, lethality: 5, coalition: "Blue", desc: "Highly accurate radar-guided twin 35mm anti-aircraft artillery." },
+            { id: "vulcan", name: "M163 Vulcan", role: "AAA", range: 1.2, altMin: 0, altMax: 5000, lethality: 4, coalition: "Blue", desc: "Radar-ranged 20mm rotary cannon. Lethal at very short ranges." }
+        ];
+
+        let currentThreatFilter = "All";
+
+        function setThreatFilter(coalition) {
+            currentThreatFilter = coalition;
+            document.querySelectorAll('.threat-filter-btn').forEach(btn => {
+                if (btn.dataset.coalition === coalition) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            });
+            filterThreats();
+        }
+
+        function toggleThreatLibBody() {
+            if (isDraggingUI) return; 
+            const body = document.getElementById('threat-lib-body');
+            const icon = document.getElementById('threat-lib-icon');
+            if (body.style.display === 'none' || body.style.display === '') {
+                body.style.display = 'flex';
+                icon.textContent = '▼';
+                filterThreats();
+            } else {
+                body.style.display = 'none';
+                icon.textContent = '▲';
+            }
+        }
+
+        function renderThreatList(threats) {
+            const list = document.getElementById('threat-lib-list');
+            list.innerHTML = "";
+            threats.forEach(t => {
+                const li = document.createElement('li');
+                li.className = 'threat-item';
+                
+                // Add a small colored dot to denote coalition in the list
+                const colorHex = t.coalition === "Red" ? "#ff4444" : "#4488ff";
+                li.innerHTML = `<span style="color:${colorHex}; font-size:16px; margin-right:6px;">•</span>${t.name}`;
+                
+                li.onclick = () => selectThreat(t, li);
+                list.appendChild(li);
+            });
+        }
+
+        function filterThreats() {
+            const query = document.getElementById('threat-lib-search').value.toLowerCase();
+            const filtered = threatDatabase.filter(t => {
+                const matchesSearch = t.name.toLowerCase().includes(query) || t.role.toLowerCase().includes(query);
+                const matchesCoalition = (currentThreatFilter === "All") || (t.coalition === currentThreatFilter);
+                return matchesSearch && matchesCoalition;
+            });
+            renderThreatList(filtered);
+        }
+
+        function selectThreat(threat, element) {
+            document.querySelectorAll('.threat-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
+
+            document.getElementById('threat-lib-details').style.display = 'block';
+            document.getElementById('threat-lib-name').textContent = threat.name;
+            
+            const coalColor = threat.coalition === "Red" ? "#ff4444" : "#4488ff";
+            document.getElementById('threat-lib-coal').innerHTML = `<span style="color:${coalColor}; font-weight:bold;">${threat.coalition}</span>`;
+            
+            document.getElementById('threat-lib-role').textContent = threat.role;
+            document.getElementById('threat-lib-range').textContent = threat.range + " NM";
+            document.getElementById('threat-lib-min').textContent = threat.altMin + " ft";
+            document.getElementById('threat-lib-max').textContent = threat.altMax + " ft";
+            document.getElementById('threat-lib-desc').textContent = threat.desc;
+            
+            document.getElementById('threat-lib-lethality-val').textContent = threat.lethality;
+            document.getElementById('threat-lib-bar').style.width = (threat.lethality * 10) + "%";
+        }
+
+        function getThreatData(model) {
+            const upper = model.toUpperCase();
+            
+            if (upper.includes("SA-18") || upper.includes("IGLA")) return threatDatabase.find(t=>t.id==="igla");
+            if (upper.includes("STINGER")) return threatDatabase.find(t=>t.id==="stinger");
+            if (upper.includes("MANPAD")) return threatDatabase.find(t=>t.id==="igla"); 
+            if (upper.includes("SHILKA") || upper.includes("ZSU-23")) return threatDatabase.find(t=>t.id==="shilka");
+            if (upper.includes("VULCAN") || upper.includes("M163")) return threatDatabase.find(t=>t.id==="vulcan");
+            if (upper.includes("GEPARD")) return threatDatabase.find(t=>t.id==="gepard");
+            if (upper.includes("TUNGUSKA") || upper.includes("SA-19") || upper.includes("2S6")) return threatDatabase.find(t=>t.id==="sa19");
+            if (upper.includes("SA-8") || upper.includes("OSA")) return threatDatabase.find(t=>t.id==="sa8");
+            if (upper.includes("SA-15") || upper.includes("TOR")) return threatDatabase.find(t=>t.id==="sa15");
+            if (upper.includes("SA-6") || upper.includes("KUB")) return threatDatabase.find(t=>t.id==="sa6");
+            if (upper.includes("SA-11") || upper.includes("BUK")) return threatDatabase.find(t=>t.id==="sa11");
+            if (upper.includes("SA-3") || upper.includes("GOA")) return threatDatabase.find(t=>t.id==="sa3");
+            if (upper.includes("SA-2") || upper.includes("GUIDELINE")) return threatDatabase.find(t=>t.id==="sa2");
+            if (upper.includes("SA-5") || upper.includes("GAMMON")) return threatDatabase.find(t=>t.id==="sa5");
+            if (upper.includes("SA-10") || upper.includes("S-300") || upper.includes("GRUMBLE")) return threatDatabase.find(t=>t.id==="sa10");
+            if (upper.includes("SA-9") || upper.includes("GASKIN")) return threatDatabase.find(t=>t.id==="sa9");
+            if (upper.includes("SA-13") || upper.includes("GOPHER")) return threatDatabase.find(t=>t.id==="sa13");
+            if (upper.includes("PATRIOT") || upper.includes("MIM-104")) return threatDatabase.find(t=>t.id==="patriot");
+            if (upper.includes("HAWK") || upper.includes("MIM-23")) return threatDatabase.find(t=>t.id==="hawk");
+            if (upper.includes("ROLAND")) return threatDatabase.find(t=>t.id==="roland");
+            if (upper.includes("RAPIER")) return threatDatabase.find(t=>t.id==="rapier");
+            if (upper.includes("CROTALE")) return threatDatabase.find(t=>t.id==="crotale");
+            if (upper.includes("AVENGER")) return threatDatabase.find(t=>t.id==="avenger");
+            if (upper.includes("LINEBACKER")) return threatDatabase.find(t=>t.id==="linebacker");
+
+            return { range: 5, altMin: 0, altMax: 20000, name: "Unknown Air Defense" };
+        }
+
+        // --- COORDINATE FORMATTERS ---
+        function updateHudCoordinates(lat, lon) {
+            document.getElementById('hud-ddm').innerHTML = `<span style="color:#ffaa00;">DDM:</span> <span style="color:#fff;">${toDDM(lat, lon, false)}</span>`;
+            document.getElementById('hud-mgrs').innerHTML = `<span style="color:#ffaa00;">MGRS:</span> <span style="color:#fff;">${toMGRS(lat, lon)}</span>`;
+        }
+
+        function toDDM(lat, lon, useHtmlBreak = false) {
+            try {
+                if (isNaN(lat) || isNaN(lon)) return "NO FIX";
+                
+                const latDir = lat >= 0 ? "N" : "S";
+                const lonDir = lon >= 0 ? "E" : "W";
+                
+                const absLat = Math.abs(lat);
+                let latDeg = Math.floor(absLat);
+                let latMin = ((absLat - latDeg) * 60).toFixed(3);
+                if (latMin < 10) latMin = "0" + latMin;
+                if (latDeg < 10) latDeg = "0" + latDeg;
+                
+                const absLon = Math.abs(lon);
+                let lonDeg = Math.floor(absLon);
+                let lonMin = ((absLon - lonDeg) * 60).toFixed(3);
+                if (lonMin < 10) lonMin = "0" + lonMin;
+                if (lonDeg < 10) lonDeg = "0" + lonDeg;
+                if (lonDeg < 100) lonDeg = "0" + lonDeg;
+                
+                const separator = useHtmlBreak ? "<br>" : " | ";
+                return `${latDir} ${latDeg}&deg; ${latMin}'${separator}${lonDir} ${lonDeg}&deg; ${lonMin}'`;
+            } catch (e) {
+                return "DDM ERR";
+            }
+        }
+
+        function toMGRS(lat, lon) {
+            try {
+                if (typeof mgrs === 'undefined') return "Loading Lib...";
+                if (isNaN(lat) || isNaN(lon)) return "NO FIX";
+                
+                const raw = mgrs.forward([lon, lat], 5);
+                const match = raw.match(/^\d+[a-zA-Z]/); 
+                
+                if (!match) return "GRID ERR";
+                
+                const gzd = match[0];
+                const rest = raw.substring(gzd.length);
+                const sq = rest.substring(0, 2); 
+                const coords = rest.substring(2);
+                const easting = coords.substring(0, coords.length / 2);
+                const northing = coords.substring(coords.length / 2);
+                
+                return `${gzd} ${sq} ${easting} ${northing}`;
+            } catch (e) {
+                return "MGRS ERR";
+            }
+        }
+
+        // --- TACTICAL SVG VEHICLE ICONS ---
+        function getIconForAircraft(data) {
+            let color = "#aaaaaa"; 
+            if (data.coalition === "Red") color = "#ff4444";
+            if (data.coalition === "Blue") color = "#4444ff";
+            if (data.isSelf) color = "#00ff00"; 
+            
+            const upperModel = data.model.toUpperCase();
+            
+            const heliModels = ["UH-1", "UH1", "MI-8", "MI8", "MI-24", "MI24", "KA-50", "KA50", "AH-64", "AH64", "SA342", "OH-58", "OH58", "CH-47", "CH47", "UH-60", "UH60", "AH-6", "AH6"];
+            const heavyModels = ["C-130", "IL-76", "KC-135", "A-50", "E-3A", "TU-95", "TU-142", "B-52", "B-1B", "C-17", "AN-26", "AN-30"];
+            const samModels = ["SA-", "RADAR", "PATRIOT", "HAWK", "ROLAND", "GEPARD", "SHILKA", "TUNGUSKA", "OSA", "BUK", "TOR", "S-300", "KUB", "STRELA", "CHAPARRAL", "AVENGER", "VULCAN", "LINEBACKER", "CHIEFTAIN", "SAM", "TRACKER"];
+            const truckModels = ["URAL", "KAMAZ", "GAZ", "ZIL", "M818", "TRUCK", "M978", "UAZ", "TIGRE", "HUMMER", "M1025", "M1043", "LAND_ROVER", "SUV", "PICKUP", "TRANSPORT", "BUS", "SKP-11", "ATMZ", "ATZ", "APA", "TZ"];
+            const infantryModels = ["INFANTRY", "SOLDIER", "IGLA", "STINGER", "RPG", "MANPAD", "JTAC", "M4", "AK", "PARATROOPER"];
+
+            const svgs = {
+                fighter: `<path d="M12 1 L14 8 L22 14 L22 16 L14 15 L13 19 L16 22 L16 23 L12 22 L8 23 L8 22 L11 19 L10 15 L2 16 L2 14 L10 8 Z" fill="${color}" stroke="#000" stroke-width="0.5"/>`,
+                heavy: `<path d="M12 2 L14 6 L23 11 L23 13 L14 12 L13 18 L17 21 L17 22 L12 21 L7 22 L7 21 L11 18 L10 12 L1 13 L1 11 L10 6 Z" fill="${color}" stroke="#000" stroke-width="0.5"/>`,
+                heli: `
+                    <rect x="7.5" y="8" width="2" height="4" fill="${color}" stroke="#000" stroke-width="0.5"/>
+                    <rect x="14.5" y="8" width="2" height="4" fill="${color}" stroke="#000" stroke-width="0.5"/>
+                    <path d="M11.2 13 L11.2 20.5 L7 20.5 L7 21.5 L17 21.5 L17 20.5 L12.8 20.5 L12.8 13 Z" fill="${color}" stroke="#000" stroke-width="0.5"/>
+                    <rect x="6.5" y="19" width="0.8" height="3" fill="${color}" stroke="#000" stroke-width="0.5"/>
+                    <path d="M9.5 6 C9.5 2 11 1 12 1 C13 1 14.5 2 14.5 6 L14.5 12 C14.5 14 13 14.5 12 14.5 C11 14.5 9.5 14 9.5 12 Z" fill="${color}" stroke="#000" stroke-width="0.5"/>
+                    <path d="M10.5 3 C10.5 2 11.5 1.5 12 1.5 C12.5 1.5 13.5 2 13.5 3 L13.5 4.5 L10.5 4.5 Z" fill="#111" />
+                    <path d="M11.6 12 L11.6 0 L12.4 0 L12.4 12 Z" fill="${color}" stroke="#000" stroke-width="0.3"/>
+                    <path d="M12 11.6 L23 4.5 L23.5 5.2 L12 12.4 Z" fill="${color}" stroke="#000" stroke-width="0.3"/>
+                    <path d="M12.4 12 L18.5 22 L17.8 22.5 L11.6 12 Z" fill="${color}" stroke="#000" stroke-width="0.3"/>
+                    <path d="M11.6 12 L5.5 22 L6.2 22.5 L12.4 12 Z" fill="${color}" stroke="#000" stroke-width="0.3"/>
+                    <path d="M12 12.4 L0.5 5.2 L1 4.5 L12 11.6 Z" fill="${color}" stroke="#000" stroke-width="0.3"/>
+                    <circle cx="12" cy="12" r="1.5" fill="#111" stroke="${color}" stroke-width="0.5"/>
+                `,
+                farp: `
+                    <circle cx="12" cy="12" r="9" fill="${color}" stroke="#000" stroke-width="1.2" />
+                    <path d="M9 8 L9 16 M15 8 L15 16 M9 12 L15 12" stroke="#111" stroke-width="2" fill="none" stroke-linecap="round" />
+                `,
+                ground: `
+                    <rect x="5" y="4" width="3" height="16" fill="#222" stroke="#000" stroke-width="0.5" rx="1"/>
+                    <rect x="16" y="4" width="3" height="16" fill="#222" stroke="#000" stroke-width="0.5" rx="1"/>
+                    <rect x="8" y="5" width="8" height="14" fill="${color}" stroke="#000" stroke-width="0.5" rx="1"/>
+                    <circle cx="12" cy="12" r="3.5" fill="${color}" stroke="#000" stroke-width="0.5"/>
+                    <rect x="11.2" y="2" width="1.6" height="8" fill="${color}" stroke="#000" stroke-width="0.5"/>
+                `,
+                sam: `
+                    <rect x="5" y="4" width="3" height="16" fill="#222" stroke="#000" stroke-width="0.5" rx="1"/>
+                    <rect x="16" y="4" width="3" height="16" fill="#222" stroke="#000" stroke-width="0.5" rx="1"/>
+                    <rect x="8" y="5" width="8" height="14" fill="${color}" stroke="#000" stroke-width="0.5" rx="1"/>
+                    <rect x="7" y="8" width="4" height="8" fill="${color}" stroke="#000" stroke-width="0.5"/>
+                    <rect x="13" y="8" width="4" height="8" fill="${color}" stroke="#000" stroke-width="0.5"/>
+                `,
+                truck: `
+                    <rect x="5" y="4" width="2" height="4" fill="#222" stroke="#000" stroke-width="0.5" rx="0.5"/>
+                    <rect x="17" y="4" width="2" height="4" fill="#222" stroke="#000" stroke-width="0.5" rx="0.5"/>
+                    <rect x="5" y="16" width="2" height="4" fill="#222" stroke="#000" stroke-width="0.5" rx="0.5"/>
+                    <rect x="17" y="16" width="2" height="4" fill="#222" stroke="#000" stroke-width="0.5" rx="0.5"/>
+                    <rect x="7" y="3" width="10" height="6" fill="${color}" stroke="#000" stroke-width="0.5" rx="1"/>
+                    <rect x="7" y="10" width="10" height="11" fill="${color}" stroke="#000" stroke-width="0.5" rx="1"/>
+                `,
+                ship: `
+                    <path d="M12 2 C16 8 18 12 18 22 L6 22 C6 12 8 8 12 2 Z" fill="${color}" stroke="#000" stroke-width="0.5"/>
+                    <rect x="9" y="10" width="6" height="8" fill="#333" stroke="#000" stroke-width="0.5"/>
+                `,
+                infantry: `
+                    <ellipse cx="12" cy="12" rx="4.5" ry="2.5" fill="${color}" stroke="#000" stroke-width="0.5"/>
+                    <circle cx="12" cy="11.5" r="2" fill="#222" stroke="#000" stroke-width="0.5"/>
+                    <rect x="13.5" y="4" width="1" height="8" fill="#333" stroke="#000" stroke-width="0.4"/>
+                `
+            };
+            
+            let svgContent = svgs.fighter; 
+            if (data.cat === 7) svgContent = svgs.ship;
+            else if (data.cat === 4) {
+                if (infantryModels.some(inf => upperModel.includes(inf))) svgContent = svgs.infantry;
+                else if (samModels.some(sam => upperModel.includes(sam))) svgContent = svgs.sam;
+                else if (truckModels.some(truck => upperModel.includes(truck))) svgContent = svgs.truck;
+                else svgContent = svgs.ground;
+            } else if (data.cat === 3) svgContent = svgs.farp;
+            else if (data.cat === 2 || heliModels.some(heli => upperModel.includes(heli))) svgContent = svgs.heli; 
+            else if (heavyModels.some(heavy => upperModel.includes(heavy))) svgContent = svgs.heavy;
+            
+            const fullSvg = `
+                <svg width="40" height="40" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0px 3px 4px rgba(0,0,0,0.6));">
+                    ${svgContent}
+                </svg>
+            `;
+
+            return L.divIcon({
+                className: 'plane-icon',
+                html: fullSvg,
+                iconSize: [40, 40], 
+                iconAnchor: [20, 20] 
+            });
+        }
+
+        // --- MISSION PLANNER SYSTEM ---
+        let activeTool = null;
+        let plannedWaypoints = [];
+        let planPolyline = null;
+        let planLegMarkers = [];
+        let arrowStartPoint = null;
+        let missionGraphics = {
+            points: [],
+            threats: [],
+            arrows: []
+        };
+
+        function setPlannerTool(toolName) {
+            clearActiveToolHighlights();
+            if (activeTool === toolName && toolName !== 'threat') {
+                activeTool = null;
+                return;
+            }
+            activeTool = toolName;
+            const btn = document.getElementById(`tool-${toolName}`);
+            if (btn) btn.classList.add('active');
+        }
+
+        function clearActiveTool() {
+            activeTool = null;
+            arrowStartPoint = null;
+            clearActiveToolHighlights();
+            document.getElementById('sam-preset').value = 'none';
+        }
+
+        function clearActiveToolHighlights() {
+            document.querySelectorAll('.planner-btn').forEach(b => b.classList.remove('active'));
+        }
+
+        function calcDistNM(p1, p2) {
+            return (map.distance(p1, p2) / 1852).toFixed(1);
+        }
+
+        function calcBearing(p1, p2) {
+            const lat1 = p1.lat * Math.PI / 180, lon1 = p1.lng * Math.PI / 180;
+            const lat2 = p2.lat * Math.PI / 180, lon2 = p2.lng * Math.PI / 180;
+            const y = Math.sin(lon2 - lon1) * Math.cos(lat2);
+            const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon2 - lon1);
+            let b = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+            return Math.round(b).toString().padStart(3, '0');
+        }
+
+        map.on('click', function(e) {
+            if (!activeTool) return;
+
+            const latlng = e.latlng;
+
+            if (activeTool === 'route') {
+                addPlannedWaypoint(latlng);
+            } else if (activeTool === 'ip') {
+                addTacticalMarker(latlng, 'IP', 'badge-ip', 'Ingress Point');
+            } else if (activeTool === 'tgt') {
+                addTacticalMarker(latlng, '🎯 TGT', 'badge-tgt', 'Target Objective');
+            } else if (activeTool === 'eg') {
+                addTacticalMarker(latlng, 'EG', 'badge-eg', 'Egress Point');
+            } else if (activeTool === 'bullseye') {
+                addBullseye(latlng);
+            } else if (activeTool === 'threat') {
+                let val = document.getElementById('sam-preset').value;
+                let radiusNM = parseFloat(val);
+                let label = document.getElementById('sam-preset').options[document.getElementById('sam-preset').selectedIndex].text;
+                if (val === 'custom') {
+                    const input = prompt("Enter threat radius in Nautical Miles (NM):", "15");
+                    if (!input) return;
+                    radiusNM = parseFloat(input);
+                    label = `Custom Threat (${radiusNM} NM)`;
+                }
+                if (!isNaN(radiusNM)) {
+                    addThreatRing(latlng, radiusNM, label);
+                }
+            } else if (activeTool === 'arrow') {
+                if (!arrowStartPoint) {
+                    arrowStartPoint = latlng;
+                    alert("Vector origin set. Click target location to complete the Ingress Vector.");
+                } else {
+                    addAttackVector(arrowStartPoint, latlng);
+                    arrowStartPoint = null;
+                }
+            }
+        });
+
+        // 1. ROUTE BUILDER
+        function addPlannedWaypoint(latlng) {
+            const wpIndex = plannedWaypoints.length;
+            plannedWaypoints.push(latlng);
+
+            const icon = L.divIcon({
+                className: 'custom-wp-icon',
+                html: `<div class="wp-badge">${wpIndex}</div>`,
+                iconSize: [22, 22],
+                iconAnchor: [11, 11]
+            });
+
+            const ddmStr = toDDM(latlng.lat, latlng.lng, false);
+            const mgrsStr = toMGRS(latlng.lat, latlng.lng);
+
+            const m = L.marker(latlng, { icon: icon }).addTo(planRouteLayer);
+            m.bindPopup(`
+                <b>Waypoint ${wpIndex}</b>
+                <hr style="border:0; border-top:1px solid #555; margin:5px 0;">
+                <span style="color:#00ffaa;">MGRS:</span> ${mgrsStr}<br>
+                <span style="color:#aaa;">DDM:</span> ${ddmStr}
+            `);
+
+            redrawPlannedRoute();
+        }
+
+        function redrawPlannedRoute() {
+            if (planPolyline) planRouteLayer.removeLayer(planPolyline);
+            planLegMarkers.forEach(lm => planRouteLayer.removeLayer(lm));
+            planLegMarkers = [];
+
+            if (plannedWaypoints.length > 1) {
+                planPolyline = L.polyline(plannedWaypoints, {
+                    color: '#00e1ff',
+                    weight: 3,
+                    dashArray: '6, 6',
+                    opacity: 0.9
+                }).addTo(planRouteLayer);
+
+                for (let i = 0; i < plannedWaypoints.length - 1; i++) {
+                    const p1 = plannedWaypoints[i];
+                    const p2 = plannedWaypoints[i+1];
+                    const mid = L.latLng((p1.lat + p2.lat) / 2, (p1.lng + p2.lng) / 2);
+                    const dist = calcDistNM(p1, p2);
+                    const brg = calcBearing(p1, p2);
+
+                    const labelMarker = L.tooltip({
+                        permanent: true,
+                        direction: 'center',
+                        className: 'route-leg-label'
+                    })
+                    .setLatLng(mid)
+                    .setContent(`${brg}° / ${dist}nm`)
+                    .addTo(planRouteLayer);
+
+                    planLegMarkers.push(labelMarker);
+                }
+            }
+        }
+
+        // 2. TACTICAL MARKERS (IP, EG, TGT)
+        function addTacticalMarker(latlng, code, badgeClass, title) {
+            const icon = L.divIcon({
+                className: 'tactical-icon',
+                html: `<div class="tactical-badge ${badgeClass}">${code}</div>`,
+                iconAnchor: [15, 10]
+            });
+
+            const ddmStr = toDDM(latlng.lat, latlng.lng, false);
+            const mgrsStr = toMGRS(latlng.lat, latlng.lng);
+
+            const m = L.marker(latlng, { icon: icon }).addTo(planTacticalLayer);
+            m.bindPopup(`
+                <b>${title}</b>
+                <hr style="border:0; border-top:1px solid #555; margin:5px 0;">
+                <span style="color:#00ffaa;">MGRS:</span> ${mgrsStr}<br>
+                <span style="color:#aaa;">DDM:</span> ${ddmStr}
+            `);
+            missionGraphics.points.push({ lat: latlng.lat, lng: latlng.lng, code, badgeClass, title });
+        }
+
+        // 3. THREAT RINGS (SAM & AAA)
+        function addThreatRing(latlng, radiusNM, label) {
+            const meters = radiusNM * 1852;
+            const circle = L.circle(latlng, {
+                radius: meters,
+                color: '#ff2222',
+                fillColor: '#ff2222',
+                fillOpacity: 0.15,
+                weight: 2,
+                dashArray: '5, 5'
+            }).addTo(planThreatLayer);
+
+            circle.bindTooltip(`<b>${label}</b><br>R: ${radiusNM} NM`, { permanent: false, direction: 'center' });
+            missionGraphics.threats.push({ lat: latlng.lat, lng: latlng.lng, radiusNM, label });
+        }
+
+        // 4. BULLSEYE
+        function addBullseye(latlng) {
+            const bullseyeIcon = L.divIcon({
+                className: 'tactical-icon',
+                html: `<div class="tactical-badge badge-bullseye">⭕ BULLSEYE</div>`,
+                iconAnchor: [35, 10]
+            });
+            L.marker(latlng, { icon: bullseyeIcon }).addTo(planTacticalLayer);
+
+            [10, 20, 30].forEach(nm => {
+                L.circle(latlng, {
+                    radius: nm * 1852,
+                    color: '#00d4ff',
+                    fill: false,
+                    weight: 1,
+                    dashArray: '4, 4',
+                    opacity: 0.6
+                }).bindTooltip(`${nm} NM`, { permanent: true, direction: 'top', className: 'route-leg-label' }).addTo(planTacticalLayer);
+            });
+        }
+
+        // 5. ATTACK VECTORS & INGRESS ARROWS
+        function addAttackVector(start, end) {
+            const brg = calcBearing(start, end);
+            const dist = calcDistNM(start, end);
+
+            L.polyline([start, end], {
+                color: '#ffaa00',
+                weight: 4,
+                opacity: 0.9
+            }).addTo(planTacticalLayer);
+
+            const arrowSvg = `
+                <svg width="30" height="30" viewBox="0 0 24 24">
+                    <path d="M12 2 L20 18 L12 14 L4 18 Z" fill="#ffaa00" stroke="#000" stroke-width="1"/>
+                </svg>
+            `;
+            const arrowIcon = L.divIcon({
+                className: 'plane-icon',
+                html: arrowSvg,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+
+            L.marker(end, { icon: arrowIcon, rotationAngle: parseFloat(brg) }).addTo(planTacticalLayer);
+
+            const mid = L.latLng((start.lat + end.lat) / 2, (start.lng + end.lng) / 2);
+            L.tooltip({ permanent: true, direction: 'center', className: 'route-leg-label' })
+                .setLatLng(mid)
+                .setContent(`AXIS: ${brg}° (${dist}nm)`)
+                .addTo(planTacticalLayer);
+
+            missionGraphics.arrows.push({ start: [start.lat, start.lng], end: [end.lat, end.lng] });
+        }
+
+        // 6. PLAN SAVE / EXPORT / IMPORT
+        function clearAllMissionGraphics() {
+            if (!confirm("Clear all planned routes, threats, and tactical markers?")) return;
+            planRouteLayer.clearLayers();
+            planTacticalLayer.clearLayers();
+            planThreatLayer.clearLayers();
+            plannedWaypoints = [];
+            planPolyline = null;
+            planLegMarkers = [];
+            missionGraphics = { points: [], threats: [], arrows: [] };
+            localStorage.removeItem("dcs_sortie_plan");
+        }
+
+        function savePlanToStorage() {
+            const payload = {
+                waypoints: plannedWaypoints,
+                graphics: missionGraphics
+            };
+            localStorage.setItem("dcs_sortie_plan", JSON.stringify(payload));
+            alert("Sortie plan saved to browser storage!");
+        }
+
+        function exportPlanJSON() {
+            const payload = {
+                waypoints: plannedWaypoints,
+                graphics: missionGraphics
+            };
+            const jsonStr = JSON.stringify(payload, null, 2);
+            navigator.clipboard.writeText(jsonStr).then(() => {
+                alert("Mission JSON copied to clipboard! Share it with your wingmen.");
+            }).catch(() => {
+                prompt("Copy your mission JSON:", jsonStr);
+            });
+        }
+
+        function importPlanJSON() {
+            const input = prompt("Paste Sortie Plan JSON:");
+            if (!input) return;
+            try {
+                const data = JSON.parse(input);
+                clearAllMissionGraphics();
+                if (data.waypoints) {
+                    data.waypoints.forEach(wp => addPlannedWaypoint(L.latLng(wp.lat, wp.lng)));
+                }
+                if (data.graphics && data.graphics.threats) {
+                    data.graphics.threats.forEach(t => addThreatRing(L.latLng(t.lat, t.lng), t.radiusNM, t.label));
+                }
+                if (data.graphics && data.graphics.points) {
+                    data.graphics.points.forEach(p => addTacticalMarker(L.latLng(p.lat, p.lng), p.code, p.badgeClass, p.title));
+                }
+                if (data.graphics && data.graphics.arrows) {
+                    data.graphics.arrows.forEach(a => addAttackVector(L.latLng(a.start[0], a.start[1]), L.latLng(a.end[0], a.end[1])));
+                }
+                alert("Mission Plan loaded successfully!");
+            } catch (err) {
+                alert("Invalid JSON data format.");
+            }
+        }
+
+        window.addEventListener('load', () => {
+            // --- INITIALIZE DRAGGABLE PANELS ---
+            makeDraggable(document.getElementById('hud-box'), document.getElementById('hud-drag'));
+            makeDraggable(document.getElementById('search-container'), document.getElementById('search-drag'));
+            makeDraggable(document.getElementById('planner-panel'), document.getElementById('planner-header'));
+            makeDraggable(document.getElementById('threat-lib-panel'), document.getElementById('threat-lib-header'));
+
+            // Load saved panel positions
+            ['hud-box', 'search-container', 'planner-panel', 'threat-lib-panel'].forEach(id => {
+                const savedPos = localStorage.getItem(id + '_pos');
+                if (savedPos) {
+                    try {
+                        const pos = JSON.parse(savedPos);
+                        const el = document.getElementById(id);
+                        if (el && pos.top && pos.left) {
+                            el.style.top = pos.top;
+                            el.style.left = pos.left;
+                            el.style.right = 'auto'; 
+                        }
+                    } catch(e) {}
+                }
+            });
+
+            // Load saved mission plan
+            const savedPlan = localStorage.getItem("dcs_sortie_plan");
+            if (savedPlan) {
+                try {
+                    const data = JSON.parse(savedPlan);
+                    if (data.waypoints) data.waypoints.forEach(wp => addPlannedWaypoint(L.latLng(wp.lat, wp.lng)));
+                    if (data.graphics && data.graphics.threats) data.graphics.threats.forEach(t => addThreatRing(L.latLng(t.lat, t.lng), t.radiusNM, t.label));
+                    if (data.graphics && data.graphics.points) data.graphics.points.forEach(p => addTacticalMarker(L.latLng(p.lat, p.lng), p.code, p.badgeClass, p.title));
+                    if (data.graphics && data.graphics.arrows) data.graphics.arrows.forEach(a => addAttackVector(L.latLng(a.start[0], a.start[1]), L.latLng(a.end[0], a.end[1])));
+                } catch(e){}
+            }
+        });
+
+        // --- WEBSOCKET DCS TELEMETRY ---
+        const ws = new WebSocket('ws://localhost:8080');
+        
+        ws.onmessage = (event) => {
+            const aircraftList = JSON.parse(event.data);
+            const centerPlane = aircraftList.find(plane => plane.isSelf);
+            
+            if (centerPlane) {
+                lastKnownSelfLocation = [centerPlane.lat, centerPlane.lon];
+                const speedKts = Math.round(centerPlane.speed * 1.94384);
+                const altFt = Math.round(centerPlane.alt * 3.28084);
+                
+                document.getElementById('hud-spd').innerText = `SPD: ${speedKts.toString().padStart(3, '0')} kts`;
+                document.getElementById('hud-alt').innerText = `ALT: ${altFt.toString().padStart(5, '0')} ft`;
+                updateHudCoordinates(centerPlane.lat, centerPlane.lon);
+            }
+
+            if (!hasCentered && centerPlane) {
+                map.setView([centerPlane.lat, centerPlane.lon], 9);
+                hasCentered = true;
+            }
+            
+            const activeIds = new Set();
+            let isThreatened = false;
+            let currentThreats = [];
+            
+            aircraftList.forEach(data => {
+                if (data.cat === 100) return; 
+
+                activeIds.add(data.id);
+                const newLatLng = new L.LatLng(data.lat, data.lon);
+                const headingDeg = (data.hdg * (180 / Math.PI)) % 360;
+                const speedKts = Math.round(data.speed * 1.94384);
+                const altFt = Math.round(data.alt * 3.28084);
+                const upperModel = data.model.toUpperCase();
+                
+                // 1. DYNAMIC THREAT RING GENERATION
+                const isInfantry = ["INFANTRY", "SOLDIER", "IGLA", "STINGER", "RPG", "MANPAD"].some(inf => upperModel.includes(inf));
+                
+                if (data.cat === 5 || (data.cat === 4 && isInfantry)) {
+                    const tData = getThreatData(upperModel);
+                    
+                    if (tData) {
+                        if (!dynamicThreatRings[data.id]) {
+                            let ringColor = '#ffaa00';
+                            if (data.coalition === 'Red') ringColor = '#ff4444';
+                            if (data.coalition === 'Blue') ringColor = '#4444ff';
+                            
+                            dynamicThreatRings[data.id] = L.circle(newLatLng, {
+                                radius: tData.range * 1852,
+                                color: ringColor,
+                                fillColor: ringColor,
+                                fillOpacity: 0.05,
+                                weight: 1,
+                                dashArray: '4, 4'
+                            }).addTo(planThreatLayer);
+                        } else {
+                            dynamicThreatRings[data.id].setLatLng(newLatLng);
+                        }
+                        
+                        if (centerPlane && data.coalition !== centerPlane.coalition && data.coalition !== "Neutral") {
+                            const slantDistNM = map.distance(lastKnownSelfLocation, newLatLng) / 1852;
+                            const centerAltFt = centerPlane.alt * 3.28084;
+                            
+                            if (slantDistNM <= tData.range && centerAltFt >= tData.min && centerAltFt <= tData.max) {
+                                isThreatened = true;
+                                currentThreats.push(`${tData.name} (${slantDistNM.toFixed(1)} NM)`);
+                            }
+                        }
+                    }
+                }
+
+                // 2. STANDARD ICON RENDERING
+                let headerTxt = '';
+                if (data.isSelf) headerTxt = `<b>You</b> <span style="color:#888; font-size:0.9em;">(${data.name})</span>`;
+                else if (data.player !== "AI") headerTxt = `<b>${data.player}</b> <span style="color:#888; font-size:0.9em;">(${data.name})</span>`;
+                else headerTxt = `<b>${data.name}</b> <span style="color:#888; font-size:0.9em;">(AI)</span>`;
+                
+                const popupContent = `${headerTxt}<br>Model: ${data.model}<br>Coalition: ${data.coalition}<br>Alt: ${altFt} ft<br>Spd: ${speedKts} kts`;
+                
+                if (markers[data.id]) {
+                    markers[data.id].setLatLng(newLatLng);
+                    markers[data.id].setRotationAngle(headingDeg);
+                    if (markers[data.id].isPopupOpen()) markers[data.id].setPopupContent(popupContent);
+                    else markers[data.id]._popup.setContent(popupContent);
+                } else {
+                    markers[data.id] = L.marker(newLatLng, {
+                        icon: getIconForAircraft(data),
+                        rotationAngle: headingDeg
+                    })
+                    .bindPopup(popupContent)
+                    .addTo(map);
+                }
+            });
+            
+            Object.keys(markers).forEach(id => {
+                if (!activeIds.has(Number(id))) {
+                    map.removeLayer(markers[id]);
+                    delete markers[id];
+                    
+                    if (dynamicThreatRings[id]) {
+                        map.removeLayer(dynamicThreatRings[id]);
+                        delete dynamicThreatRings[id];
+                    }
+                }
+            });
+
+            const alertBox = document.getElementById('threat-alert');
+            const alertDetails = document.getElementById('threat-details');
+            
+            if (isThreatened) {
+                alertBox.style.display = 'block';
+                alertDetails.innerHTML = currentThreats.join('<br>');
+            } else {
+                alertBox.style.display = 'none';
+            }
+        };
+
+        document.getElementById('recenter-btn').addEventListener('click', () => {
+            if (lastKnownSelfLocation) {
+                map.flyTo(lastKnownSelfLocation, 9, { animate: true, duration: 0.5 });
+            } else {
+                alert("Waiting for DCS telemetry...");
+            }
+        });
+
+        // --- TACTICAL MEASURING TOOL (Middle Mouse Button) ---
+        let isMeasuring = false;
+        let measureStartPoint = null;
+        let measureLine = null;
+        let measureTooltip = null;
+
+        window.addEventListener("mousedown", function(e) {
+            if (e.button === 1) e.preventDefault();
+        }, { passive: false });
+
+        map.on('mousedown', function(e) {
+            if (e.originalEvent.button === 1) {
+                isMeasuring = true;
+                measureStartPoint = e.latlng;
+                map.dragging.disable();
+                
+                measureLine = L.polyline([measureStartPoint, measureStartPoint], {
+                    color: '#ffaa00', 
+                    weight: 3, 
+                    dashArray: '5, 5',
+                    interactive: false
+                }).addTo(map);
+                
+                measureTooltip = L.tooltip({ 
+                    permanent: true, 
+                    className: 'measure-tooltip', 
+                    direction: 'right', 
+                    offset: [15, 0] 
+                })
+                .setLatLng(measureStartPoint)
+                .setContent("Measuring...")
+                .addTo(map);
+            }
+        });
+
+        map.on('mousemove', function(e) {
+            if (isMeasuring && measureStartPoint) {
+                const currentPoint = e.latlng;
+                measureLine.setLatLngs([measureStartPoint, currentPoint]);
+                
+                const distNM = calcDistNM(measureStartPoint, currentPoint);
+                const bearing = calcBearing(measureStartPoint, currentPoint);
+                
+                measureTooltip.setLatLng(currentPoint)
+                    .setContent(`BRG: ${bearing}°<br>DST: ${distNM} nm`);
+            }
+        });
+
+        map.on('mouseup', function(e) {
+            if (e.originalEvent.button === 1 && isMeasuring) {
+                isMeasuring = false;
+                map.dragging.enable();
+                if (measureLine) { map.removeLayer(measureLine); measureLine = null; }
+                if (measureTooltip) { map.removeLayer(measureTooltip); measureTooltip = null; }
+            }
+        });
+
+        // --- AIRPORT SEARCH FUNCTIONALITY ---
+        let searchMarker = null;
+
+        async function performSearch() {
+            const query = document.getElementById('search-input').value.trim();
+            if (!query) return;
+
+            const searchQuery = encodeURIComponent(query + " airport");
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${searchQuery}&limit=1`;
+            
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data && data.length > 0) {
+                    const lat = parseFloat(data[0].lat);
+                    const lon = parseFloat(data[0].lon);
+                    
+                    map.flyTo([lat, lon], 12, { animate: true, duration: 1.5 });
+                    
+                    if (searchMarker) map.removeLayer(searchMarker);
+                    searchMarker = L.marker([lat, lon]).addTo(map)
+                        .bindPopup(`<b>Search Result:</b><br>${data[0].display_name}`)
+                        .openPopup();
+                } else {
+                    alert("Location not found. Try adding the country or a more specific name.");
+                }
+            } catch (error) {
+                console.error("Search error:", error);
+                alert("Error communicating with the mapping database.");
+            }
+        }
+
+        document.getElementById('search-btn').addEventListener('click', performSearch);
+        document.getElementById('search-input').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') performSearch();
+        });
+    </script>
+</body>
+</html>

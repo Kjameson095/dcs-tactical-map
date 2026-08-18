@@ -1,0 +1,41 @@
+{
+  "name": "dcs-tactical-map",
+  "version": "1.0.0",
+  "description": "Standalone tactical map for DCS World",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.jamesonscripts.dcstacticalmap",
+    "productName": "DCS Tactical Map",
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "uninstallDisplayName": "DCS Tactical Map"
+    }
+  },
+  "overrides": {
+    "@noble/hashes": "1.3.2"
+  },
+  "keywords": [
+    "dcs",
+    "map",
+    "tactical"
+  ],
+  "author": "Jameson/JamesonScripts",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}
