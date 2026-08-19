@@ -13,6 +13,13 @@
     "win": {
       "target": "nsis"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Kjameson095",
+        "repo": "dcs-tactical-map"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -29,9 +36,10 @@
     "map",
     "tactical"
   ],
-  "author": "Jameson/JamesonScripts",
+  "author": "JamesonScripts",
   "license": "MIT",
   "dependencies": {
+    "electron-updater": "^6.1.8",
     "ws": "^8.16.0"
   },
   "devDependencies": {
